@@ -2,6 +2,7 @@
 .gradle/
 .kotlin/
 **/build/
+.worktrees/
 local.properties
 
 # Android Studio and IntelliJ
