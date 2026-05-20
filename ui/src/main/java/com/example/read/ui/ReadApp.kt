@@ -1,9 +1,11 @@
 package com.example.read.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -15,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -56,12 +60,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.tooling.preview.Preview
+import com.example.read.data.model.Book
 import com.example.read.reader.ReaderChapter
 import com.example.read.reader.ReaderCanvasView
 import kotlin.math.roundToInt
 
 @Composable
 fun ReadApp(
+    state: ReadUiState = ReadUiState(),
+    onOpenBook: (Book) -> Unit = {},
+    onCloseReader: () -> Unit = {},
     importedBookTitle: String? = null,
     onImportedBookConsumed: () -> Unit = {},
     onOpenFilePicker: () -> Unit = {},
@@ -73,11 +81,14 @@ fun ReadApp(
     ) {
         Surface(modifier = Modifier.fillMaxSize()) {
             ReadHomeScreen(
+                state = state,
                 importedBookTitle = importedBookTitle,
                 onImportedBookConsumed = onImportedBookConsumed,
                 darkTheme = darkTheme,
                 onDarkThemeChange = { darkTheme = it },
                 onOpenFilePicker = onOpenFilePicker,
+                onOpenBook = onOpenBook,
+                onCloseReader = onCloseReader,
             )
         }
     }
@@ -85,24 +96,20 @@ fun ReadApp(
 
 @Composable
 private fun ReadHomeScreen(
+    state: ReadUiState,
     importedBookTitle: String?,
     onImportedBookConsumed: () -> Unit,
     darkTheme: Boolean,
     onDarkThemeChange: (Boolean) -> Unit,
     onOpenFilePicker: () -> Unit,
+    onOpenBook: (Book) -> Unit,
+    onCloseReader: () -> Unit,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Home) }
     var readingBookTitle by rememberSaveable { mutableStateOf<String?>(null) }
     var readerSettingsVisible by rememberSaveable { mutableStateOf(false) }
     var readerSettings by rememberSaveable(stateSaver = ReaderDisplaySettingsSaver) {
         mutableStateOf(ReaderDisplaySettings())
-    }
-    val sampleChapter = remember {
-        ReaderChapter(
-            id = "sample-chapter",
-            title = "Chapter 1",
-            content = SAMPLE_READER_TEXT,
-        )
     }
 
     LaunchedEffect(importedBookTitle) {
@@ -112,12 +119,44 @@ private fun ReadHomeScreen(
         }
     }
 
+    val selectedReader = state.selectedReader
+    if (selectedReader != null) {
+        ReaderShell(
+            title = selectedReader.title,
+            pageLabel = selectedReader.pageLabel,
+            progress = selectedReader.progress,
+            chapter = ReaderChapter(
+                id = selectedReader.chapterId,
+                title = selectedReader.chapterTitle,
+                content = selectedReader.chapterContent,
+            ),
+            settings = readerSettings,
+            darkTheme = darkTheme,
+            onBack = onCloseReader,
+            onOpenSettings = { readerSettingsVisible = true },
+        )
+        if (readerSettingsVisible) {
+            ReaderSettingsSheet(
+                settings = readerSettings,
+                darkTheme = darkTheme,
+                onSettingsChange = { readerSettings = it.normalized() },
+                onDarkThemeChange = onDarkThemeChange,
+                onDismiss = { readerSettingsVisible = false },
+            )
+        }
+        return
+    }
+
     if (readingBookTitle != null) {
         ReaderShell(
             title = readingBookTitle.orEmpty(),
             pageLabel = "Page 1 of 1",
             progress = 0.12f,
-            chapter = sampleChapter,
+            chapter = ReaderChapter(
+                id = "sample-chapter",
+                title = "Chapter 1",
+                content = SAMPLE_READER_TEXT,
+            ),
             settings = readerSettings,
             darkTheme = darkTheme,
             onBack = { readingBookTitle = null },
@@ -170,6 +209,8 @@ private fun ReadHomeScreen(
     ) { padding ->
         when (selectedTab) {
             HomeTab.Home -> ReadingCenter(
+                state = state,
+                onOpenBook = onOpenBook,
                 modifier = Modifier.padding(padding),
             )
             HomeTab.Settings -> SettingsScreen(
@@ -249,13 +290,138 @@ internal fun readerProgressLabel(pageLabel: String, progress: Float): String {
 
 @Composable
 private fun ReadingCenter(
+    state: ReadUiState,
+    onOpenBook: (Book) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(
+    if (state.books.isEmpty() && state.importMessage == null && !state.isImporting) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+        )
+        return
+    }
+
+    LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp),
-    )
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(vertical = 24.dp),
+    ) {
+        if (state.importMessage != null || state.isImporting) {
+            item {
+                ImportStatusCard(
+                    isImporting = state.isImporting,
+                    message = state.importMessage ?: "Importing book...",
+                )
+            }
+        }
+        items(
+            items = state.books,
+            key = { it.id },
+        ) { book ->
+            BookshelfBookRow(
+                book = book,
+                onClick = { onOpenBook(book) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImportStatusCard(
+    isImporting: Boolean,
+    message: String,
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.44f),
+        ),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (isImporting) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp),
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.56f),
+                    trackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f),
+                )
+            }
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(if (isImporting) 2f else 1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BookshelfBookRow(
+    book: Book,
+    onClick: () -> Unit,
+) {
+    val item = book.toBookshelfItem()
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "Open ${item.title}" },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 42.dp, height = 56.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(6.dp),
+                    ),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = item.subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
 @Composable
