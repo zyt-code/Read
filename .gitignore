@@ -1,0 +1,25 @@
+# Gradle and Android build output
+.gradle/
+.kotlin/
+**/build/
+local.properties
+
+# Android Studio and IntelliJ
+.idea/
+*.iml
+
+# Packaged artifacts and signing material
+*.apk
+*.ap_
+*.aab
+*.jks
+*.keystore
+
+# Native/build intermediates
+.cxx/
+.externalNativeBuild/
+
+# OS and local tool output
+.DS_Store
+.playwright-mcp/
+.superpowers/
