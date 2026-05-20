@@ -3,51 +3,62 @@ package com.example.read
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.core.content.IntentCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.read.ui.ReadApp
 
 class MainActivity : ComponentActivity() {
-    private var importedBookTitle by mutableStateOf<String?>(null)
+    private val viewModel: MainViewModel by viewModels()
 
     private val openBookDocument = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         uri ?: return@registerForActivityResult
-        contentResolver.takePersistableUriPermission(
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-        )
-        importedBookTitle = resolveDisplayName(uri) ?: "Imported book"
-        // The MVP import pipeline will copy this URI into app-private storage next.
+        persistReadPermission(uri)
+        viewModel.importBook(uri)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleShareIntent(intent)
+
         setContent {
+            val state by viewModel.uiState.collectAsStateWithLifecycle()
             ReadApp(
-                importedBookTitle = importedBookTitle,
-                onImportedBookConsumed = { importedBookTitle = null },
+                state = state,
                 onOpenFilePicker = {
                     openBookDocument.launch(SUPPORTED_BOOK_MIME_TYPES)
                 },
+                onOpenBook = viewModel::openBook,
+                onCloseReader = viewModel::closeReader,
             )
         }
     }
 
-    private fun resolveDisplayName(uri: Uri): String? {
-        return contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor ->
-                if (!cursor.moveToFirst()) return@use null
-                val columnIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (columnIndex < 0) return@use null
-                cursor.getString(columnIndex)
-            }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val uri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            ?: return
+        viewModel.importBook(uri)
+    }
+
+    private fun persistReadPermission(uri: Uri) {
+        runCatching {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
     }
 
     private companion object {
