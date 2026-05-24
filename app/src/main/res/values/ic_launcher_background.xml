@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动器图标的背景色，棕色系，呼应书架/书籍主题 -->
+<resources>
+    <color name="ic_launcher_background">#795548</color>
+</resources>
